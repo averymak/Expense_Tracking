@@ -110,11 +110,18 @@ sb.auth.onAuthStateChange(async (event, session) => {
 });
 document.getElementById("signout").addEventListener("click", () => sb.auth.signOut());
 
-async function sendLink(){
+async function signIn(){
   const email = document.getElementById("login-email").value.trim();
-  if (!email) { loginMsg = "Enter your email."; render(); return; }
-  const { error } = await sb.auth.signInWithOtp({ email, options: { emailRedirectTo: location.origin + location.pathname } });
-  loginMsg = error ? "Could not send: " + error.message : "Check your email for a sign-in link, then open it on this device.";
+  const password = document.getElementById("login-password").value;
+  const { error } = await sb.auth.signInWithPassword({ email, password });
+  loginMsg = error ? error.message : "";
+  render();
+}
+async function createAccount(){
+  const email = document.getElementById("login-email").value.trim();
+  const password = document.getElementById("login-password").value;
+  const { error } = await sb.auth.signUp({ email, password });
+  loginMsg = error ? error.message : "Account created. Tap Sign in.";
   render();
 }
 
@@ -222,9 +229,11 @@ const views = {
 function loginView(){
   return `<div class="card">
     <h3>Sign in</h3>
-    <div class="muted">Enter your email. We'll send a sign-in link. Use the same email on every device.</div>
+    <div class="muted">Enter your email and a password.</div>
     <label>Email<input id="login-email" type="email" autocomplete="email"></label>
-    <button class="primary" data-action="sendlink">Email me a sign-in link</button>
+    <label>Password<input id="login-password" type="password" autocomplete="current-password"></label>
+    <button class="primary" data-action="signin">Sign in</button>
+    <button class="primary" data-action="create" style="background:none;color:var(--accent);border:1px solid var(--accent)">Create account</button>
     <div class="muted" style="margin-top:10px">${esc(loginMsg)}</div>
   </div>`;
 }
@@ -280,7 +289,8 @@ function updateBudget(){
 document.addEventListener("click", e => {
   const tabBtn = e.target.closest("[data-tab]");
   if (tabBtn){ tab = tabBtn.dataset.tab; render(); return; }
-  if (e.target.closest('[data-action="sendlink"]')){ sendLink(); return; }
+  if (e.target.closest('[data-action="signin"]')){ signIn(); return; }
+  if (e.target.closest('[data-action="create"]')){ createAccount(); return; }
   const add = e.target.closest('[data-action="add"]');
   if (add){
     const amount = parseFloat(document.getElementById("eam").value);
@@ -298,7 +308,7 @@ document.addEventListener("click", e => {
   if (del && confirm("Delete this expense?")) deleteExpense(del.dataset.del);
 });
 document.addEventListener("keydown", e => {
-  if (e.key === "Enter" && e.target.id === "login-email") sendLink();
+  if (e.key === "Enter" && e.target.id === "login-email") signIn();
 });
 document.addEventListener("change", e => {
   const f = e.target.closest("[data-field]");
