@@ -46,7 +46,7 @@ const SUPABASE_ANON_KEY = "sb_publishable_0EXdPINbf7HWScB-s2wzKA_kzbIXUFA";
 // ==============================================================
 
 const sb = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
-const AREAS = ["Groceries", "Social and other"];
+const AREAS = ["Groceries", "Social/Entertainment", "Household", "Subscriptions"];
 // 2026 paydays (excludes Jun 29, Jul 14, Jul 30, Aug 13, Aug 28)
 const PAYDAYS = ["2026-01-14","2026-01-29","2026-02-12","2026-02-26","2026-03-12","2026-03-30",
   "2026-04-14","2026-04-29","2026-05-14","2026-05-28","2026-06-12","2026-09-14","2026-10-14",
@@ -54,7 +54,7 @@ const PAYDAYS = ["2026-01-14","2026-01-29","2026-02-12","2026-02-26","2026-03-12
 const DEFAULTS = {
   pay: 773.65, start: "2026-11-03", bank: 4362.34, bmo: 330.93, td: 1893.25,
   rent: 1080, utilities: 135, oneAmt: 5333, oneDate: "2027-02-15",
-  budgets: {"Groceries": 0, "Social and other": 0}
+  budgets: {"Groceries": 0, "Social/Entertainment": 0, "Household": 0, "Subscriptions": 0}
 };
 
 let user = null, S = structuredClone(DEFAULTS), tab = "home", loginMsg = "";
