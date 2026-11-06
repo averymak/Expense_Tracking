@@ -1,0 +1,328 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Expenses">
+<title>Expense Tracker</title>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.min.js"></script>
+<style>
+:root{--bg:#f5f6f8;--card:#fff;--text:#1d2330;--muted:#6b7280;--accent:#2563eb;--bad:#dc2626;--line:#e5e7eb}
+@media (prefers-color-scheme:dark){:root{--bg:#0f1218;--card:#181d27;--text:#e6e9f0;--muted:#9aa3b2;--accent:#60a5fa;--line:#2a3140}}
+*{box-sizing:border-box}
+body{margin:0;font-family:Arial,Helvetica,sans-serif;background:var(--bg);color:var(--text);padding-bottom:env(safe-area-inset-bottom,0px)}
+header{position:sticky;top:0;z-index:5;background:var(--card);border-bottom:1px solid var(--line);padding:14px 16px;padding-top:calc(14px + env(safe-area-inset-top,0px));font-weight:bold;font-size:18px;display:flex;justify-content:space-between;align-items:center}
+header a{font-size:13px;font-weight:normal;color:var(--accent);cursor:pointer;text-decoration:none}
+nav{display:flex;gap:6px;padding:8px;background:var(--card);border-bottom:1px solid var(--line)}
+nav button{flex:1;padding:10px 4px;border:0;border-radius:8px;background:none;color:var(--muted);font-size:15px}
+nav button.on{background:var(--accent);color:#fff}
+main{padding:14px;max-width:640px;margin:0 auto}
+.card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:14px;margin-bottom:12px}
+.big{font-size:34px;font-weight:bold;margin:4px 0}
+.muted{color:var(--muted);font-size:13px}
+.row{display:flex;justify-content:space-between;gap:10px;padding:8px 0;border-bottom:1px solid var(--line);font-size:15px}
+.row:last-child{border-bottom:0}
+label{display:block;font-size:13px;color:var(--muted);margin-top:10px}
+input,select{width:100%;padding:11px;font-size:16px;border:1px solid var(--line);border-radius:8px;background:var(--bg);color:var(--text);margin-top:4px}
+button.primary,a.primary{width:100%;padding:13px;margin-top:12px;border:0;border-radius:8px;background:var(--accent);color:#fff;font-size:16px;display:block;text-align:center;text-decoration:none}
+button.x{background:none;border:0;color:var(--bad);font-size:20px;padding:0 0 0 8px}
+input[type=range]{width:100%;margin:10px 0 2px;accent-color:var(--accent)}
+.bar{height:10px;background:var(--line);border-radius:5px;overflow:hidden;margin-top:6px}
+.bar>div{height:100%;background:var(--accent)}
+.bar>div.over{background:var(--bad)}
+.neg{color:var(--bad)}
+h3{margin:4px 0 8px;font-size:16px}
+</style>
+</head>
+<body>
+<header><span>Expense Tracker</span><a id="signout" style="display:none">Sign out</a></header>
+<nav id="nav"></nav>
+<main id="app"><div class="card muted">Loading…</div></main>
+<script>
+// ===== FILL IN FROM YOUR SUPABASE PROJECT (Settings > API) =====
+const SUPABASE_URL = "https://vrpibrbwfrwsxhpaveri.supabase.co/rest/v1/";
+const SUPABASE_ANON_KEY = "sb_publishable_0EXdPINbf7HWScB-s2wzKA_kzbIXUFA";
+// ==============================================================
+
+const sb = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+const AREAS = ["Groceries", "Social and other"];
+// 2026 paydays (excludes Jun 29, Jul 14, Jul 30, Aug 13, Aug 28)
+const PAYDAYS = ["2026-01-14","2026-01-29","2026-02-12","2026-02-26","2026-03-12","2026-03-30",
+  "2026-04-14","2026-04-29","2026-05-14","2026-05-28","2026-06-12","2026-09-14","2026-10-14",
+  "2026-10-29","2026-11-12","2026-11-27","2026-12-14","2026-12-30"];
+const DEFAULTS = {
+  pay: 773.65, start: "2026-11-03", bank: 4362.34, bmo: 330.93, td: 1893.25,
+  rent: 1080, utilities: 135, oneAmt: 5333, oneDate: "2027-02-15",
+  budgets: {"Groceries": 0, "Social and other": 0}
+};
+
+let user = null, S = structuredClone(DEFAULTS), tab = "home", loginMsg = "";
+S.expenses = [];
+
+// ---------- Storage (Supabase) ----------
+async function loadAll(){
+  const { data: st, error: e1 } = await sb.from("settings").select("data").eq("user_id", user.id).maybeSingle();
+  if (e1) throw e1;
+  if (st && st.data) S = Object.assign(structuredClone(DEFAULTS), st.data);
+  await loadExpenses();
+}
+async function loadExpenses(){
+  const { data, error } = await sb.from("expenses").select("*").eq("user_id", user.id).order("expense_date");
+  if (error) throw error;
+  S.expenses = data.map(r => ({ id: r.id, date: r.expense_date, area: r.category, amount: Number(r.amount), note: r.note || "" }));
+}
+let settingsChain = Promise.resolve(), settingsDirty = false;
+function saveSettings(){
+  settingsDirty = true;
+  const data = Object.assign({}, S); delete data.expenses;
+  settingsChain = settingsChain
+    .then(() => sb.from("settings").upsert({ user_id: user.id, data }, { onConflict: "user_id" }))
+    .then(({ error }) => { if (error) throw error; settingsDirty = false; setStatus("Saved"); })
+    .catch(err => setStatus("Save failed: " + err.message));
+}
+async function addExpense(e){
+  setStatus("Saving…");
+  const { error } = await sb.from("expenses").insert({ user_id: user.id, expense_date: e.date,
+    category: e.area, amount: e.amount, note: e.note });
+  if (error) { setStatus("Save failed: " + error.message); return; }
+  await loadExpenses(); setStatus("Saved"); render();
+}
+async function deleteExpense(id){
+  const { error } = await sb.from("expenses").delete().eq("id", id).eq("user_id", user.id);
+  if (error) { setStatus("Delete failed: " + error.message); return; }
+  await loadExpenses(); setStatus("Saved"); render();
+}
+function setStatus(t){ const el = document.getElementById("status"); if (el) el.textContent = t; }
+
+// ---------- Auth ----------
+sb.auth.onAuthStateChange(async (event, session) => {
+  if (session) {
+    user = session.user;
+    document.getElementById("signout").style.display = "inline";
+    try { if (!settingsDirty) await loadAll(); } catch (e) { loginMsg = "Could not load data: " + e.message; }
+    render();
+  } else {
+    user = null;
+    document.getElementById("signout").style.display = "none";
+    render();
+  }
+});
+document.getElementById("signout").addEventListener("click", () => sb.auth.signOut());
+
+async function sendLink(){
+  const email = document.getElementById("login-email").value.trim();
+  if (!email) { loginMsg = "Enter your email."; render(); return; }
+  const { error } = await sb.auth.signInWithOtp({ email, options: { emailRedirectTo: location.origin + location.pathname } });
+  loginMsg = error ? "Could not send: " + error.message : "Check your email for a sign-in link, then open it on this device.";
+  render();
+}
+
+// ---------- Calculations ----------
+const money = n => "$" + (Math.round(n*100)/100).toLocaleString("en-CA",{minimumFractionDigits:2,maximumFractionDigits:2});
+const ymd = d => d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0")+"-"+String(d.getDate()).padStart(2,"0");
+const today = () => ymd(new Date());
+const esc = s => String(s||"").replace(/[<>&]/g, c => ({"<":"&lt;",">":"&gt;","&":"&amp;"}[c]));
+const income = () => Math.round(S.pay * PAYDAYS.length / 52 * 100) / 100;
+const budgetTotal = () => AREAS.reduce((a,k) => a + (+S.budgets[k] || 0), 0);
+const room = k => Math.max(0, Math.round((income() - (budgetTotal() - (+S.budgets[k]||0)))*100)/100);
+const addDays = (s,n) => { const d = new Date(s+"T00:00:00"); d.setDate(d.getDate()+n); return ymd(d); };
+const weekStart = () => { const d = new Date(); d.setDate(d.getDate() - ((d.getDay()+6)%7)); return ymd(d); };
+const sumIn = (from, to, area) => S.expenses
+  .filter(e => e.date >= from && e.date < to && (!area || e.area === area))
+  .reduce((a,e) => a + e.amount, 0);
+function spendable(){
+  const t = today();
+  const paid = PAYDAYS.filter(d => d >= S.start && d <= t).length * S.pay;
+  const one = (S.oneDate && S.oneDate >= S.start && S.oneDate <= t) ? S.oneAmt : 0;
+  return S.bank - S.bmo - S.td - S.rent - S.utilities + paid + one - sumIn(S.start, "9999-12-31");
+}
+function nextPay(){ const t = today(); return PAYDAYS.find(d => d > t) || "none"; }
+
+// ---------- Views ----------
+const views = {
+  home(){
+    const sp = spendable();
+    return `
+      <div class="card">
+        <div class="muted">Spendable right now</div>
+        <div class="big ${sp<0?'neg':''}">${money(sp)}</div>
+        <div class="row"><span>Real balance (bank minus credit cards)</span><span>${money(S.bank-S.bmo-S.td)}</span></div>
+        <div class="row"><span>Upcoming rent and utilities</span><span>${money(S.rent+S.utilities)}</span></div>
+        <div class="muted" style="margin-top:6px">Next payday: ${nextPay()}</div>
+        ${nextPay()!=="none" ? `<div class="muted" style="margin-top:6px">Spendable after next payday: <b class="${sp+S.pay<0?'neg':''}">${money(sp+S.pay)}</b></div>
+        <div class="muted" style="margin-top:4px">Real balance after next payday: <b>${money(S.bank-S.bmo-S.td+S.pay)}</b></div>` : ""}
+      </div>
+      <div class="card">
+        <div class="row"><span>Bank balance</span><span>${money(S.bank)}</span></div>
+        <div class="row"><span>Credit cards owed</span><span>${money(S.bmo+S.td)}</span></div>
+        <div class="row"><span>Fixed weekly income</span><span>${money(income())}</span></div>
+      </div>
+      <div class="card">
+        <h3>Your starting numbers</h3>
+        ${field("pay","Paycheque amount",S.pay)}
+        ${field("start","Tracking start date",S.start,"date")}
+        ${field("bank","Bank balance",S.bank)}
+        ${field("bmo","BMO credit card owed",S.bmo)}
+        ${field("td","TD credit card owed",S.td)}
+        ${field("rent","Upcoming rent",S.rent)}
+        ${field("utilities","Upcoming utilities and phone",S.utilities)}
+        ${field("oneAmt","One-time income amount",S.oneAmt)}
+        ${field("oneDate","One-time income date",S.oneDate,"date")}
+      </div>`;
+  },
+  log(){
+    const list = S.expenses.slice().sort((a,b) => b.date.localeCompare(a.date)).slice(0,50);
+    return `
+      <div class="card">
+        <h3>Add an expense</h3>
+        <label>Date<input id="ed" type="date" value="${today()}"></label>
+        <label>Area<select id="ea">${AREAS.map(a => `<option>${a}</option>`).join("")}</select></label>
+        <label>Amount (CAD)<input id="eam" type="number" step="0.01" inputmode="decimal" placeholder="0.00"></label>
+        <label>Note (optional)<input id="en" type="text"></label>
+        <button class="primary" data-action="add">Add expense</button>
+      </div>
+      <div class="card">
+        <h3>Recent expenses</h3>
+        ${list.map(e => `<div class="row"><span>${e.date} · ${e.area}${e.note?' · '+esc(e.note):''}</span>
+          <span>${money(e.amount)}<button class="x" data-del="${e.id}" aria-label="Delete">×</button></span></div>`).join("")
+          || '<div class="muted">No expenses yet.</div>'}
+      </div>`;
+  },
+  budget(){
+    return `
+      <div class="card">
+        <div class="muted">Fixed weekly income</div>
+        <div class="big">${money(income())}</div>
+        <div class="muted">Budgeted <span id="btot">${money(budgetTotal())}</span> · Left to allocate <span id="bleft">${money(income()-budgetTotal())}</span></div>
+        <div class="muted" style="margin-top:6px">Slide, or type an amount. You can't go past your weekly income.</div>
+      </div>
+      ${AREAS.map(a => `
+        <div class="card">
+          <div class="row" style="border:0"><span>${a}</span>
+            <span><input type="number" inputmode="decimal" step="0.5" min="0" data-budget-num="${a}" value="${S.budgets[a]||0}" style="width:120px;display:inline-block;margin:0;padding:6px;text-align:right"> / week</span></div>
+          <input type="range" data-budget="${a}" min="0" max="${room(a)}" step="0.5" value="${S.budgets[a]||0}">
+          <div class="muted" id="m-${a}">Max ${money(room(a))}</div>
+        </div>`).join("")}`;
+  },
+  reports(){
+    const ws = weekStart(), we = addDays(ws,7);
+    const t = today();
+    const ms = t.slice(0,8)+"01";
+    const md = new Date(ms+"T00:00:00"); md.setMonth(md.getMonth()+1); const me = ymd(md);
+    const ys = t.slice(0,4)+"-01-01", ye = (+t.slice(0,4)+1)+"-01-01";
+    return section("This week", ws, we, 1)
+         + section("This month", ms, me, 52/12)
+         + section("This year", ys, ye, 52)
+         + `<div class="card"><button class="primary" data-action="email">Email this report to averygmak@outlook.com</button>
+            <div class="muted" style="margin-top:8px">Opens your email app with the summary filled in. Tap send. Do this on the last day of each month, and on December 31 for the year.</div></div>`;
+  }
+};
+
+function loginView(){
+  return `<div class="card">
+    <h3>Sign in</h3>
+    <div class="muted">Enter your email. We'll send a sign-in link. Use the same email on every device.</div>
+    <label>Email<input id="login-email" type="email" autocomplete="email"></label>
+    <button class="primary" data-action="sendlink">Email me a sign-in link</button>
+    <div class="muted" style="margin-top:10px">${esc(loginMsg)}</div>
+  </div>`;
+}
+function field(key, label, val, type="number"){
+  return `<label>${label}<input data-field="${key}" type="${type}" value="${val}" ${type==="number"?'step="0.01" inputmode="decimal"':''}></label>`;
+}
+function section(title, from, to, mult){
+  const tb = budgetTotal()*mult;
+  const spentTotal = sumIn(from, to);
+  const over = tb > 0 && spentTotal > tb;
+  const pct = tb > 0 ? Math.min(spentTotal/tb*100, 100) : 0;
+  return `
+    <div class="card">
+      <h3>${title} <span class="muted">${from} to ${to}</span></h3>
+      <div class="row"><span>Spent</span><span class="${over?'neg':''}">${money(spentTotal)}</span></div>
+      <div class="row"><span>Budget</span><span>${money(tb)}</span></div>
+      <div class="row"><span>Left</span><span class="${tb-spentTotal<0?'neg':''}">${money(tb-spentTotal)}</span></div>
+      <div class="bar"><div class="${over?'over':''}" style="width:${pct}%"></div></div>
+      <div style="margin-top:12px">
+        ${AREAS.map(a => {
+          const s = sumIn(from, to, a), b = (S.budgets[a]||0)*mult;
+          const p = b > 0 ? Math.min(s/b*100,100) : 0;
+          return `<div class="row" style="display:block"><div style="display:flex;justify-content:space-between"><span>${a}</span><span>${money(s)} of ${money(b)}</span></div>
+            <div class="bar"><div class="${s>b&&b>0?'over':''}" style="width:${p}%"></div></div></div>`;
+        }).join("")}
+      </div>
+    </div>`;
+}
+
+function render(){
+  const nav = document.getElementById("nav"), app = document.getElementById("app");
+  if (!user) { nav.innerHTML = ""; app.innerHTML = loginView(); return; }
+  nav.innerHTML = [["home","Home"],["log","Log"],["budget","Budget"],["reports","Reports"]]
+    .map(([k,v]) => `<button data-tab="${k}" class="${tab===k?'on':''}">${v}</button>`).join("");
+  app.innerHTML = views[tab]() + `<div class="muted" id="status" style="text-align:center;margin:8px 0"></div>`;
+}
+function updateBudget(){
+  AREAS.forEach(a => {
+    const el = document.querySelector(`[data-budget="${a}"]`);
+    if (!el) return;
+    el.max = room(a);
+    el.value = S.budgets[a] || 0;
+    const nb = document.querySelector(`[data-budget-num="${a}"]`);
+    if (nb && document.activeElement !== nb) nb.value = S.budgets[a] || 0;
+    document.getElementById("m-"+a).textContent = "Max " + money(room(a));
+  });
+  const bt = document.getElementById("btot"), bl = document.getElementById("bleft");
+  if (bt) bt.textContent = money(budgetTotal());
+  if (bl) bl.textContent = money(income()-budgetTotal());
+}
+
+// ---------- Events ----------
+document.addEventListener("click", e => {
+  const tabBtn = e.target.closest("[data-tab]");
+  if (tabBtn){ tab = tabBtn.dataset.tab; render(); return; }
+  if (e.target.closest('[data-action="sendlink"]')){ sendLink(); return; }
+  const add = e.target.closest('[data-action="add"]');
+  if (add){
+    const amount = parseFloat(document.getElementById("eam").value);
+    if (!(amount > 0)){ alert("Enter an amount greater than 0."); return; }
+    addExpense({ date: document.getElementById("ed").value || today(),
+      area: document.getElementById("ea").value, amount, note: document.getElementById("en").value.trim() });
+    return;
+  }
+  if (e.target.closest('[data-action="email"]')){
+    const body = Array.from(document.querySelectorAll("#app .card")).slice(0,-1).map(c => c.innerText).join("\n\n");
+    window.location.href = "mailto:averygmak@outlook.com?subject=" + encodeURIComponent("Expense report " + today()) + "&body=" + encodeURIComponent(body);
+    return;
+  }
+  const del = e.target.closest("[data-del]");
+  if (del && confirm("Delete this expense?")) deleteExpense(del.dataset.del);
+});
+document.addEventListener("keydown", e => {
+  if (e.key === "Enter" && e.target.id === "login-email") sendLink();
+});
+document.addEventListener("change", e => {
+  const f = e.target.closest("[data-field]");
+  if (f){
+    const k = f.dataset.field;
+    S[k] = f.type === "date" ? f.value : (parseFloat(f.value) || 0);
+    saveSettings(); render(); return;
+  }
+  const n = e.target.closest("[data-budget-num]");
+  if (n) n.value = S.budgets[n.dataset.budgetNum] || 0;
+});
+document.addEventListener("input", e => {
+  const r = e.target.closest("[data-budget]");
+  const n = e.target.closest("[data-budget-num]");
+  if (n){
+    const a = n.dataset.budgetNum; let v = parseFloat(n.value); if (isNaN(v)) v = 0;
+    S.budgets[a] = Math.min(Math.max(0, v), room(a)); saveSettings(); updateBudget(); return;
+  }
+  if (!r) return;
+  S.budgets[r.dataset.budget] = parseFloat(r.value) || 0;
+  saveSettings(); updateBudget();
+});
+
+render();
+</script>
+</body>
+</html>
