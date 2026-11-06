@@ -96,30 +96,42 @@ async function deleteExpense(id){
 function setStatus(t){ const el = document.getElementById("status"); if (el) el.textContent = t; }
 
 // ---------- Auth ----------
+function showUser(u){
+  user = u;
+  document.getElementById("signout").style.display = u ? "inline" : "none";
+}
 sb.auth.onAuthStateChange(async (event, session) => {
-  if (session) {
-    user = session.user;
-    document.getElementById("signout").style.display = "inline";
-    try { if (!settingsDirty) await loadAll(); } catch (e) { loginMsg = "Could not load data: " + e.message; }
-    render();
-  } else {
-    user = null;
-    document.getElementById("signout").style.display = "none";
-    render();
+  if (session && (!user || user.id !== session.user.id)) {
+    showUser(session.user);
+    try { await loadAll(); } catch (e) { loginMsg = "Could not load data: " + e.message; }
+  } else if (!session) {
+    showUser(null);
+    S = structuredClone(DEFAULTS); S.expenses = [];
   }
+  render();
 });
-document.getElementById("signout").addEventListener("click", () => sb.auth.signOut());
-
+document.getElementById("signout").addEventListener("click", async (e) => {
+  e.preventDefault();
+  await sb.auth.signOut({ scope: "local" });
+  showUser(null);
+  S = structuredClone(DEFAULTS); S.expenses = [];
+  loginMsg = "";
+  render();
+});
 async function signIn(){
   const email = document.getElementById("login-email").value.trim();
   const password = document.getElementById("login-password").value;
-  const { error } = await sb.auth.signInWithPassword({ email, password });
-  loginMsg = error ? error.message : "";
+  if (!email || !password) { loginMsg = "Enter your email and password."; render(); return; }
+  const { data, error } = await sb.auth.signInWithPassword({ email, password });
+  if (error) { loginMsg = error.message; render(); return; }
+  showUser(data.user);
+  try { await loadAll(); loginMsg = ""; } catch (e) { loginMsg = "Could not load data: " + e.message; }
   render();
 }
 async function createAccount(){
   const email = document.getElementById("login-email").value.trim();
   const password = document.getElementById("login-password").value;
+  if (!email || !password) { loginMsg = "Enter an email and a password (at least 6 characters)."; render(); return; }
   const { error } = await sb.auth.signUp({ email, password });
   loginMsg = error ? error.message : "Account created. Tap Sign in.";
   render();
